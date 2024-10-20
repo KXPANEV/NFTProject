@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NFT Minting</title>
+    <script src="https://cdn.jsdelivr.net/npm/ethers/dist/ethers.umd.min.js"></script> <!-- Подключение ethers.js -->
+</head>
+
+<body>
+<h1>Выпуск и отзыв NFT</h1>
+
+<h2>Выпуск NFT</h2>
+<input type="text" id="mintAddress" placeholder="Ethereum адрес" />
+<input type="text" id="nftName" placeholder="Имя" />
+<input type="text" id="nftSurname" placeholder="Фамилия" />
+<input type="text" id="nftWorkplace" placeholder="Место работы" />
+<input type="text" id="nftImage" placeholder="URL изображения" />
+<input type="text" id="vcIssuer" placeholder="Выдающий орган" />
+<input type="text" id="vcIssuanceDate" placeholder="Дата выдачи" />
+<button id="signVCButton">Подписать VC</button>
+<input type="text" id="vcSignature" placeholder="Подпись" readonly />
+<input type="text" id="verifyTokenId" placeholder="ID токена для проверки" />
+<button id="verifyButton">Проверить подлинность</button>
+<button id="mintButton">Выпустить NFT</button>
+
+<h2>Отзыв NFT</h2>
+<input type="number" id="revokeTokenId" placeholder="ID токена" />
+<button id="revokeButton">Отозвать NFT</button>
+
+<script>
+    document.getElementById('signVCButton').onclick = async () => {
+        try {
+            const vcData = {
+                issuer: document.getElementById('vcIssuer').value,
+                issuanceDate: document.getElementById('vcIssuanceDate').value,
+                address: document.getElementById('mintAddress').value,
+            };
+
+            const response = await fetch('http://localhost:3000/sign-vc', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(vcData),
+            });
+
+            if (!response.ok) {
+                throw new Error("Ошибка сети");
+            }
+
+            const data = await response.json();
+            const signature = data.signature;
+
+            document.getElementById('vcSignature').value = signature; // Отображаем подпись
+            alert("Подпись VC: " + signature);
+        } catch (error) {
+            console.error("Ошибка при подписании VC:", error);
+            alert("Произошла ошибка при подписании VC.");
+        }
+    };
+
+    document.getElementById('mintButton').onclick = async () => {
+        try {
+            const address = document.getElementById('mintAddress').value;
+            const name = document.getElementById('nftName').value;
+            const surname = document.getElementById('nftSurname').value;
+            const workplace = document.getElementById('nftWorkplace').value;
+            const imageUrl = document.getElementById('nftImage').value;
+            const signature = document.getElementById('vcSignature').value; // Добавляем подпись
+            const issuanceDate = new Date().toISOString();
+
+            const response = await fetch('http://localhost:3000/mint', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ address, name, surname, workplace, imageUrl, issuer: document.getElementById('vcIssuer').value, issuanceDate, signature }),
+            });
+
+            // Убедитесь, что ответ не пуст
+            if (!response.ok) {
+                const errorData = await response.json();
+                console.error("Ошибка при выпуске NFT:", errorData);
+                alert(errorData.error || "Произошла ошибка при выпуске NFT.");
+                return;
+            }
+
+            const data = await response.json();
+            console.log("Ответ от сервера:", data);
+            alert("NFT успешно выпущен!");
+
+        } catch (error) {
+            console.error("Ошибка:", error);
+            alert("Произошла ошибка при выпуске NFT.");
+        }
+    };
+
+    document.getElementById('revokeButton').onclick = async () => {
+        const tokenId = document.getElementById('revokeTokenId').value;
+        try {
+            const response = await fetch('http://localhost:3000/revoke', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ tokenId }),
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                console.error("Ошибка при отзыве NFT:", errorData);
+                alert(errorData.error || "Произошла ошибка при отзыве NFT.");
+                return;
+            }
+
+            const data = await response.json();
+            console.log(data);
+            alert("NFT успешно отозван!");
+        } catch (error) {
+            console.error("Ошибка:", error);
+            alert("Произошла ошибка при отзыве NFT.");
+        }
+    };
+
+    document.getElementById('verifyButton').onclick = async () => {
+        try {
+            const tokenId = document.getElementById('verifyTokenId').value;
+
+            const response = await fetch(`http://localhost:3000/metadata/${tokenId}`);
+            if (!response.ok) {
+                const errorData = await response.json(); // Получите данные ошибки
+                throw new Error(`Ошибка сети: ${errorData.error || "Неизвестная ошибка"}`);
+            }
+
+            const data = await response.json();
+            const metadata = data.metadata;
+
+            console.log("Полученные метаданные:", metadata);
+
+            const vcData = {
+                issuer: metadata.issuer,
+                to: metadata.to,
+                issuanceDate: metadata.issuanceDate,
+            };
+            const signature = metadata.signature;
+            const issuerAddress = metadata.issuer;
+
+            const isValid = await verifySignature(vcData, signature, issuerAddress);
+
+            alert(isValid ? "Подпись подлинная" : "Подпись не соответствует");
+        } catch (error) {
+            console.error("Ошибка при проверке подписи:", error);
+            alert("Произошла ошибка при проверке подписи.");
+        }
+    };
+    async function verifySignature(vcData, signature, expectedAddress) {
+        try {
+            const message = JSON.stringify(vcData);
+            const recoveredAddress = ethers.utils.verifyMessage(message, signature);
+            return recoveredAddress.toLowerCase() === expectedAddress.toLowerCase();
+        } catch (error) {
+            console.error("Ошибка при восстановлении адреса:", error);
+            return false; // Вернем false в случае ошибки
+        }
+    }
+</script>
+</body>
+</html>
